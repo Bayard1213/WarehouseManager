@@ -1,0 +1,50 @@
+﻿<div class="top-row ps-3 navbar navbar-dark">
+    <div class="container-fluid">
+        <a class="navbar-brand" href="">Управление складом</a>
+        <button title="Управление складом" class="navbar-toggler" @onclick="ToggleNavMenu">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+    </div>
+</div>
+
+<div class="@NavMenuCssClass nav-scrollable" @onclick="ToggleNavMenu">
+    <nav class="flex-column">
+        <div class="nav-item px-3">
+            <h4 style="color:white">Склад</h4>
+            <NavLink class="nav-link" href="balances" Match="NavLinkMatch.All">
+                <span class="bi" aria-hidden="true"></span> Баланс
+            </NavLink>
+            <NavLink class="nav-link" href="receipts">
+                <span class="bi" aria-hidden="true"></span> Поступления
+            </NavLink>
+            <NavLink class="nav-link" href="shipments">
+                <span class="bi" aria-hidden="true"></span> Отгрузки
+            </NavLink>
+        </div>
+    </nav>
+    <nav class="flex-column">
+        <div class="nav-item px-3">
+            <h4 style="color:white">Справочники</h4>
+            <NavLink class="nav-link" href="clients" Match="NavLinkMatch.All">
+                <span class="bi" aria-hidden="true"></span> Клиенты
+            </NavLink>
+            <NavLink class="nav-link" href="measures">
+                <span class="bi" aria-hidden="true"></span> Единицы измерения
+            </NavLink>
+            <NavLink class="nav-link" href="resources">
+                <span class="bi" aria-hidden="true"></span> Ресурсы
+            </NavLink>
+        </div>
+    </nav>
+</div>
+
+@code {
+    private bool collapseNavMenu = true;
+
+    private string? NavMenuCssClass => collapseNavMenu ? "collapse" : null;
+
+    private void ToggleNavMenu()
+    {
+        collapseNavMenu = !collapseNavMenu;
+    }
+}

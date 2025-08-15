@@ -1,0 +1,339 @@
+﻿@page "/shipments"
+
+@inject HttpClient Http
+@inject NotificationService NotificationService
+@inject ModalFormService ModalFormService
+
+@using WarehouseManager.Shared.Api
+@using WarehouseManager.Shared.Dtos.Shipment
+@using WarehouseManager.Shared.Dtos.Measure
+@using WarehouseManager.Shared.Dtos.Resource
+@using WarehouseManager.Client.Layout.Components
+@using WarehouseManager.Client.Layout.Modals.Shipment
+@using WarehouseManager.Shared.Enums
+
+<PageTitle>Отгрузка</PageTitle>
+<h3>Отгрузка</h3>
+<CreateShipmentModal />
+<UpdateShipmentModal/>
+
+<EditForm Model="@filter" OnValidSubmit="LoadShipments">
+    <div class="d-flex flex-wrap gap-3 m-3">
+        <div style="flex: 1 1 200px;">
+            <label>Ресурсы</label>
+            <MultiSelect Items="@allResourcesSelectItems" SelectedItems="@selectedResources" SelectedItemsChanged="OnResourcesChanged" />
+        </div>
+        <div style="flex: 1 1 200px;">
+            <label>Единицы измерения</label>
+            <MultiSelect Items="@allMeasuresSelectItems" SelectedItems="@selectedMeasures" SelectedItemsChanged="OnMeasuresChanged" />
+        </div>
+        <div style="flex: 1 1 200px;">
+            <label>Номера документов (через запятую)</label>
+            <input class="form-control" @bind="documentNumbersInput" />
+        </div>
+        <div style="flex: 1 1 200px;">
+            <label>Дата с</label>
+            <InputDate @bind-Value="filter.DateFrom" class="form-control" />
+        </div>
+        <div style="flex: 1 1 200px;">
+            <label>Дата по</label>
+            <InputDate @bind-Value="filter.DateTo" class="form-control" />
+        </div>
+    </div>
+    <div class="m-3">
+        <button class="btn btn-primary" type="submit">Применить фильтр</button>
+        <button class="btn btn-primary ms-3" @onclick="CreateShipment">Добавить</button>
+    </div>
+</EditForm>
+
+@if (isLoading)
+{
+    <p><em>Загрузка...</em></p>
+}
+else if (shipments is null)
+{
+    <p>Данные не загружены</p>
+}
+else if (!shipments.Any())
+{
+    <p>Нет данных по фильтру</p>
+}
+else
+{
+    <table class="table table-bordered table-striped">
+        <thead>
+            <tr>
+                <th>Номер документа</th>
+                <th>Имя клиента</th>
+                <th>Дата получения</th>
+                <th>Статус</th>
+                <th>Ресурсы</th>
+                <th>Действие</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var shipment in shipments)
+            {
+                <tr>
+                    <td>@shipment.DocumentNumber</td>
+                    <td>@shipment.Client.Name</td>
+                    <td>@shipment.DateShipment.ToString("dd.MM.yyyy")</td>
+                    <td class="d-flex align-items-center justify-content-between">
+                        <span>@GetStatusText(shipment.Status)</span>
+                        @if(shipment.Status == DocumentStatus.Draft){
+                            <button class="btn btn-success btn-sm"
+                                    @onclick="() => SigningDocument(shipment.DocumentId)">
+                                <i class="bi bi-file-earmark-check"></i> Подписать документ
+                            </button>
+                        }
+                        @if(shipment.Status == DocumentStatus.Signed)
+                        {
+                            <button class="btn btn-warning btn-sm"
+                                    @onclick="() => RevokingDocument(shipment.DocumentId)">
+                                <i class="bi bi-file-earmark-excel"></i> Отозвать документ
+                            </button>
+                        }
+                    </td>
+                    <td>
+                        <table class="table table-sm table-borderless mb-0">
+                            <thead>
+                                <tr>
+                                    <th>Ресурс</th>
+                                    <th>Ед. измерения</th>
+                                    <th>Количество</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var resource in shipment.ShipmentResources)
+                                {
+                                    <tr>
+                                        <td>@resource.ResourceName</td>
+                                        <td>@resource.MeasureName</td>
+                                        <td>@resource.Quantity</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </td>
+                    <td class="align-items-center justify-content-end">
+                        <button class="btn btn-primary btn-sm me-1" @onclick="() => UpdateShipment(shipment)" title="Редактировать">
+                            <i class="bi bi-pencil-square"></i>
+                        </button>
+                        <button class="btn btn-danger btn-sm" @onclick="() => DeleteShipment(shipment.DocumentId)" title="Удалить">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private ShipmentFilterDto filter = new();
+    private List<ShipmentWithResourcesDto>? shipments;
+
+    private List<ResourceDto> allResources = new();
+    private List<MeasureDto> allMeasures = new();
+
+    private List<MultiSelect.SelectItem> allResourcesSelectItems = new();
+    private List<MultiSelect.SelectItem> allMeasuresSelectItems = new();
+
+    private List<MultiSelect.SelectItem> selectedResources = new();
+    private List<MultiSelect.SelectItem> selectedMeasures = new();
+
+    private bool isLoading = false;
+
+    private string documentNumbersInput = string.Empty;
+
+
+    protected override async Task OnInitializedAsync()
+    {
+        allResources = await LoadAllResourcesAsync();
+        allMeasures = await LoadAllMeasuresAsync();
+
+        allResourcesSelectItems = allResources.Select(r => new MultiSelect.SelectItem { Id = r.Id, Name = r.Name }).ToList();
+        allMeasuresSelectItems = allMeasures.Select(m => new MultiSelect.SelectItem { Id = m.Id, Name = m.Name }).ToList();
+
+        await LoadShipments();
+    }
+
+    private async Task LoadShipments()
+    {
+        isLoading = true;
+        try
+        {
+            filter.ResourceIds = selectedResources.Select(i => i.Id).ToList();
+            filter.MeasureIds = selectedMeasures.Select(i => i.Id).ToList();
+
+            filter.DocumentNumbers = documentNumbersInput
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Where(s => !string.IsNullOrWhiteSpace(s))
+                .ToList();
+
+            var query = new List<string>();
+
+            if (filter.DateFrom.HasValue)
+                query.Add($"DateFrom={filter.DateFrom.Value:yyyy-MM-dd}");
+
+            if (filter.DateTo.HasValue)
+                query.Add($"DateTo={filter.DateTo.Value:yyyy-MM-dd}");
+
+            if (filter.DocumentNumbers?.Any() == true)
+                query.AddRange(filter.DocumentNumbers.Select(num => $"DocumentNumbers={Uri.EscapeDataString(num)}"));
+
+            if (filter.ResourceIds?.Any() == true)
+                query.AddRange(filter.ResourceIds.Select(id => $"ResourceIds={id}"));
+
+            if (filter.MeasureIds?.Any() == true)
+                query.AddRange(filter.MeasureIds.Select(id => $"MeasureIds={id}"));
+
+            var queryString = query.Any() ? "?" + string.Join("&", query) : string.Empty;
+
+            var response = await Http.GetFromJsonAsync<ApiResponse<List<ShipmentWithResourcesDto>>>($"api/Shipment{queryString}");
+
+            if (response?.Success == true)
+                shipments = response.Data ?? new();
+            else
+                shipments = new List<ShipmentWithResourcesDto>();
+        }
+        catch (Exception ex)
+        {
+            NotificationService.Show($"Ошибка загрузки отгрузрк: {ex.Message}", false);
+            shipments = new List<ShipmentWithResourcesDto>();
+        }
+        finally
+        {
+            isLoading = false;
+        }
+        StateHasChanged();
+    }
+
+    private void CreateShipment()
+    {
+        ModalFormService.Open<CreateShipmentDto>(
+            "Добавить документ отгрузки",
+            async (dto) =>
+            {
+                var resp = await Http.PostAsJsonAsync("api/Shipment", dto);
+                var apiResp = await resp.Content.ReadFromJsonAsync<ApiResponse<ShipmentWithResourcesDto>>();
+
+                NotificationService.Show(apiResp?.Message ?? "Неизвестная ошибка", apiResp?.Success ?? false);
+
+                if (apiResp?.Success == true)
+                {
+                    NotificationService.Show(apiResp?.Message ?? "Документ отгрузки успешно добавлен", apiResp?.Success ?? true);
+
+                    await LoadShipments();
+                }
+            });
+    }
+
+    private void UpdateShipment(ShipmentWithResourcesDto shipment)
+    {
+        var resourcesModel = new List<UpdateShipmentResourcesDto>();
+
+        foreach (var resource in shipment.ShipmentResources ?? Enumerable.Empty<ShipmentResourcesDto>())
+        {
+            resourcesModel.Add(new UpdateShipmentResourcesDto
+            {
+                Id = resource.Id,
+                ResourceId = resource.ResourceId,
+                MeasureId = resource.MeasureId,
+                Quantity = resource.Quantity
+            });
+        }
+
+        var documentModel = new UpdateShipmentDto
+        {
+            DocumentNumber = shipment.DocumentNumber,
+            ClientId = shipment.Client.Id,
+            DateShipment = shipment.DateShipment,
+            Status = shipment.Status,
+            ShipmentResources = resourcesModel
+        };
+
+        ModalFormService.Open<UpdateShipmentDto>(
+            "Редактировать документ поступления",
+            async (dto) =>
+            {
+                var resp = await Http.PutAsJsonAsync($"api/Shipment/{shipment.DocumentId}", dto);
+                var apiResp = await resp.Content.ReadFromJsonAsync<ApiResponse>();
+
+                NotificationService.Show(apiResp?.Message ?? "Неизвестная ошибка", apiResp?.Success ?? false);
+
+                if (apiResp?.Success == true)
+                {
+                    NotificationService.Show(apiResp?.Message ?? "Документ успешно обновлен", apiResp?.Success ?? true);
+                    await LoadShipments();
+                }
+            },
+            documentModel
+        );
+    }
+
+    private async Task DeleteShipment(int id)
+    {
+        var resp = await Http.DeleteAsync($"api/Shipment/{id}");
+        var apiResp = await resp.Content.ReadFromJsonAsync<ApiResponse>();
+        NotificationService.Show(apiResp?.Message ?? "Ошибка удаления документа отгрузки", apiResp?.Success ?? false);
+
+        if (apiResp?.Success == true)
+            await LoadShipments();
+    }
+
+    private async Task SigningDocument(int id)
+    {
+        var resp = await Http.PostAsync($"api/Shipment/{id}/sign", null);
+        var apiResp = await resp.Content.ReadFromJsonAsync<ApiResponse>();
+        NotificationService.Show(apiResp?.Message ?? "Ошибка подписания документа отгрузки", apiResp?.Success ?? false);
+
+        if (apiResp?.Success == true)
+            await LoadShipments();
+    }
+
+    private async Task RevokingDocument(int id)
+    {
+        var resp = await Http.PostAsync($"api/Shipment/{id}/revoke", null);
+        var apiResp = await resp.Content.ReadFromJsonAsync<ApiResponse>();
+        NotificationService.Show(apiResp?.Message ?? "Ошибка отзыва документа отгрузки", apiResp?.Success ?? false);
+
+        if (apiResp?.Success == true)
+            await LoadShipments();
+    }
+
+    private Task OnResourcesChanged(List<MultiSelect.SelectItem> selected)
+    {
+        selectedResources = selected;
+        return Task.CompletedTask;
+    }
+
+    private Task OnMeasuresChanged(List<MultiSelect.SelectItem> selected)
+    {
+        selectedMeasures = selected;
+        return Task.CompletedTask;
+    }
+
+    private async Task<List<ResourceDto>> LoadAllResourcesAsync()
+    {
+        var response = await Http.GetFromJsonAsync<ApiResponse<List<ResourceDto>>>("api/Resource/all");
+        return response?.Data ?? new();
+    }
+
+    private async Task<List<MeasureDto>> LoadAllMeasuresAsync()
+    {
+        var response = await Http.GetFromJsonAsync<ApiResponse<List<MeasureDto>>>("api/Measure/all");
+        return response?.Data ?? new();
+    }
+
+    private string GetStatusText(DocumentStatus status)
+    {
+        return status switch
+        {
+            DocumentStatus.Draft => "Черновик",
+            DocumentStatus.Signed => "Подписан",
+            DocumentStatus.Revoked => "Отозван",
+            _ => status.ToString()
+        };
+    }
+}

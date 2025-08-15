@@ -1,0 +1,39 @@
+﻿@inject NotificationService NotificationService
+
+<div class="position-fixed bottom-0 end-0 p-3" style="z-index: 9999">
+    @if (NotificationService.IsVisible)
+    {
+        <div class="alert  @NotificationService.CssClass"
+             role="alert" aria-live="assertive" aria-atomic="true"
+             @onmouseenter="@(() => NotificationService.IsMouseOver = true)"
+             @onmouseleave="@(() => NotificationService.IsMouseOver = false)">
+            <div class="toast-header">
+                <span class="me-auto fw-bold">
+                    @(NotificationService.CssClass.Contains("success") ? "Успех" : "Ошибка")
+                </span>
+                <button type="button" class="btn-close" @onclick="Hide" data-bs-dismiss="toast" aria-label="Закрыть"></button>
+
+            </div>
+            <div class="toast-body">
+                <p>
+                    @NotificationService.Message
+                </p>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private void Hide() => NotificationService.Hide();
+
+    protected override void OnInitialized()
+    {
+        NotificationService.OnChange += StateHasChanged;
+    }
+
+    public void Dispose()
+    {
+        NotificationService.OnChange -= StateHasChanged;
+    }
+}
+

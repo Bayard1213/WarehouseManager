@@ -1,0 +1,219 @@
+﻿@page "/measures"
+@inject HttpClient Http
+@inject NavigationManager Navigation
+@inject NotificationService NotificationService
+@inject ModalFormService ModalFormService
+
+@using WarehouseManager.Shared.Dtos.Measure
+@using WarehouseManager.Shared.Api
+@using WarehouseManager.Shared.Enums
+@using WarehouseManager.Client.Layout.Modals.Measure
+
+<PageTitle>Единицы измерения</PageTitle>
+<h3>Единицы измерения</h3>
+<CreateMeasureModal/>
+<UpdateMeasureModal/>
+
+<div class="mb-2">
+    <div class="d-flex align-items-center">
+        <div class="form-check form-switch m-0">
+            <input class="form-check-input" type="checkbox" id="archiveSwitch"
+                   role="switch" @bind="isArchive" @bind:after="LoadMeasures" />
+        </div>
+        <label class="form-check-label ms-2" for="archiveSwitch">Архив</label>
+
+        <button class="btn btn-primary ms-3" @onclick="CreateMeasure">Добавить</button>
+    </div>
+</div>
+
+@if (isLoading)
+{
+    <p><em>Загрузка...</em></p>
+}
+else if (measures is not null && measures.Any())
+{
+    <table class="table table-striped">
+        <thead>
+            <tr>
+                <th>Имя</th>
+                <th>Статус</th>
+                <th>Действие</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var measure in measures)
+            {
+                <tr>
+                    <td>@measure.Name</td>
+                    <td class="d-flex align-items-center justify-content-between">
+                        <span>@GetStatusText(measure.Status)</span>
+                        @if (isArchive)
+                        {
+                            <button class="btn btn-success btn-sm"
+                                    @onclick="() => ChangeMeasureStatus(measure.Id, false)">
+                                <i class="bi bi-arrow-counterclockwise"></i> Восстановить
+                            </button>
+                        }
+                        else
+                        {
+                            <button class="btn btn-secondary btn-sm"
+                                    @onclick="() => ChangeMeasureStatus(measure.Id, true)">
+                                <i class="bi bi-archive"></i> В архив
+                            </button>
+                        }
+                    </td>
+
+                    <td class="align-items-center justify-content-end">
+                        <button class="btn btn-primary btn-sm me-1" @onclick="() => UpdateMeasure(measure)" title="Редактировать">
+                            <i class="bi bi-pencil-square"></i>
+                        </button>
+                        <button class="btn btn-danger btn-sm" @onclick="() => DeleteMeasure(measure.Id)" title="Удалить">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+else
+{
+    <p>Нет данных</p>
+}
+
+@code {
+    private List<MeasureDto>? measures;
+    private bool isArchive = false;
+    private bool isLoading = false;
+
+
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadMeasures();
+    }
+
+    private async Task LoadMeasures()
+    {
+        isLoading = true;
+        try
+        {
+            var response = await Http.GetFromJsonAsync<ApiResponse<List<MeasureDto>>>(
+                $"api/Measure?isActive={!isArchive}");
+            measures = response?.Data ?? new();
+        }
+        catch (Exception ex)
+        {
+            NotificationService.Show($"Ошибка загрузки единиц измерения: {ex.Message}", false);
+        }
+        finally
+        {
+            isLoading = false;
+        }
+        StateHasChanged();
+    }
+
+    private void CreateMeasure()
+    {
+        ModalFormService.Open<CreateMeasureDto>(
+            "Добавить единицу измерения",
+            async (dto) =>
+            {
+                var resp = await Http.PostAsJsonAsync("api/Measure", dto);
+                var apiResp = await resp.Content.ReadFromJsonAsync<ApiResponse<MeasureDto>>();
+
+                NotificationService.Show(apiResp?.Message ?? "Неизвестная ошибка", apiResp?.Success ?? false);
+
+                if (apiResp?.Success == true)
+                {
+                    NotificationService.Show(apiResp?.Message ?? "Единица измерения успешно добавлена", apiResp?.Success ?? true);
+
+                    await LoadMeasures();
+                }
+            });
+    }
+
+    private void UpdateMeasure(MeasureDto measure)
+    {
+        var model = new UpdateMeasureDto
+        {
+            Name = measure.Name,
+            Status = measure.Status
+        };
+
+        ModalFormService.Open<UpdateMeasureDto>(
+               "Редактирование единицы измерения",
+               async (dto) =>
+               {
+                   var resp = await Http.PutAsJsonAsync($"api/Measure/{measure.Id}", dto);
+                   var apiResp = await resp.Content.ReadFromJsonAsync<ApiResponse<MeasureDto>>();
+
+                   NotificationService.Show(apiResp?.Message ?? "Неизвестная ошибка", apiResp?.Success ?? false);
+
+                   if (apiResp?.Success == true)
+                   {
+                       NotificationService.Show(apiResp?.Message ?? "Единица измерения успешно обновлена", apiResp?.Success ?? true);
+                       await LoadMeasures();
+                   }
+               },
+               model
+        );
+    }
+
+    private async Task DeleteMeasure(int id)
+    {
+        var resp = await Http.DeleteAsync($"api/Measure/{id}");
+        var apiResp = await resp.Content.ReadFromJsonAsync<ApiResponse>();
+        NotificationService.Show(apiResp?.Message ?? "Ошибка удаления единицы измерения", apiResp?.Success ?? false);
+
+        if (apiResp?.Success == true)
+            await LoadMeasures();
+    }
+
+    private async Task ChangeMeasureStatus(int id, bool toArchive)
+    {
+        try
+        {
+            HttpResponseMessage resp;
+
+            if (toArchive)
+            {
+                resp = await Http.PatchAsJsonAsync($"api/Measure/{id}/archive", new { });
+            }
+            else
+            {
+                resp = await Http.PatchAsJsonAsync($"api/Measure/{id}/unarchive", new { });
+            }
+
+            var apiResp = await resp.Content.ReadFromJsonAsync<ApiResponse<object>>();
+
+            NotificationService.Show(apiResp?.Message ?? "Операция выполнена", apiResp?.Success ?? false);
+
+            if (apiResp?.Success == true)
+            {
+                await LoadMeasures();
+            }
+        }
+        catch (Exception ex)
+        {
+            NotificationService.Show($"Ошибка изменения статуса: {ex.Message}", false);
+        }
+    }
+
+    private Task ShowMessage(string message)
+    {
+        Console.WriteLine(message);
+        return Task.CompletedTask;
+    }
+
+    private string GetStatusText(EntityStatus status)
+    {
+        return status switch
+        {
+            EntityStatus.Active => "Активно",
+            EntityStatus.Archived => "Архивировано",
+            _ => status.ToString()
+        };
+    }
+}
+

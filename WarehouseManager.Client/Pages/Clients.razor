@@ -1,0 +1,225 @@
+﻿@page "/clients"
+@inject HttpClient Http
+@inject NavigationManager Navigation
+@inject NotificationService NotificationService
+@inject ModalFormService ModalFormService
+
+@using WarehouseManager.Shared.Dtos.Client
+@using WarehouseManager.Shared.Api
+@using WarehouseManager.Shared.Enums
+@using WarehouseManager.Client.Layout.Modals.Client
+
+<PageTitle>Клиенты</PageTitle>
+<h3>Клиенты</h3>
+<CreateClientModal/>
+<UpdateClientModal/>
+
+<div class="mb-2">
+    <div class="d-flex align-items-center">
+        <div class="form-check form-switch m-0">
+            <input class="form-check-input" type="checkbox" id="archiveSwitch"
+                   role="switch" @bind="isArchive" @bind:after="LoadClients" />
+        </div>
+        <label class="form-check-label ms-2" for="archiveSwitch">Архив</label>
+
+        <button class="btn btn-primary ms-3" @onclick="CreateClient">Добавить</button>
+    </div>
+</div>
+
+
+@if (isLoading)
+{
+    <p><em>Загрузка...</em></p>
+}
+else if (clients is not null && clients.Any())
+{
+    <table class="table table-striped">
+        <thead>
+            <tr>
+                <th>Имя</th>
+                <th>Адрес</th>
+                <th>Статус</th>
+                <th>Действие</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var client in clients)
+            {
+                <tr>
+                    <td>@client.Name</td>
+                    <td>@client.Address</td>
+                    <td class="d-flex align-items-center justify-content-between">
+                        <span>@GetStatusText(client.Status)</span>
+                        @if (isArchive)
+                        {
+                            <button class="btn btn-success btn-sm"
+                                    @onclick="() => ChangeClientStatus(client.Id, false)">
+                                <i class="bi bi-arrow-counterclockwise"></i> Восстановить
+                            </button>
+                        }
+                        else
+                        {
+                            <button class="btn btn-secondary btn-sm"
+                                    @onclick="() => ChangeClientStatus(client.Id, true)">
+                                <i class="bi bi-archive"></i> В архив
+                            </button>
+                        }
+                    </td>
+                    <td class="align-items-center justify-content-end">
+                        <button class="btn btn-primary btn-sm me-1" @onclick="() => UpdateClient(client)" title="Редактировать">
+                            <i class="bi bi-pencil-square"></i>
+                        </button>
+                        <button class="btn btn-danger btn-sm" @onclick="() => DeleteClient(client.Id)" title="Удалить">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </td>
+                </tr>
+
+            }
+        </tbody>
+    </table>
+
+}
+else
+{
+    <p>Нет данных</p>
+}
+
+
+@code {
+    private List<ClientDto>? clients;
+    private bool isArchive = false;
+    private bool isLoading = false;
+
+
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadClients();
+    }
+
+    private async Task LoadClients()
+    {
+        isLoading = true;
+        try
+        {
+            var response = await Http.GetFromJsonAsync<ApiResponse<List<ClientDto>>>(
+                $"api/Client?isActive={!isArchive}");
+            clients = response?.Data ?? new();
+        }
+        catch (Exception ex)
+        {
+            NotificationService.Show($"Ошибка загрузки клиентов: {ex.Message}", false);
+        }
+        finally
+        {
+            isLoading = false;
+        }
+        StateHasChanged(); 
+    }
+
+    private void CreateClient()
+    {
+        ModalFormService.Open<CreateClientDto>(
+            "Добавить клиента",
+            async (dto) =>
+            {
+                var resp = await Http.PostAsJsonAsync("api/Client", dto);
+                var apiResp = await resp.Content.ReadFromJsonAsync<ApiResponse<ClientDto>>();
+
+                NotificationService.Show(apiResp?.Message ?? "Неизвестная ошибка", apiResp?.Success ?? false);
+
+                if (apiResp?.Success == true)
+                {
+                    NotificationService.Show(apiResp?.Message ?? "Клиент успешно добавлен", apiResp?.Success ?? true);
+
+                    await LoadClients();
+                }
+            });
+    }
+
+    private void UpdateClient(ClientDto client)
+    {
+        var model = new UpdateClientDto
+        {
+            Name = client.Name,
+            Address = client.Address,
+            Status = client.Status
+        };
+
+        ModalFormService.Open<UpdateClientDto>(
+               "Редактирование клиента",
+               async (dto) =>
+               {
+                   var resp = await Http.PutAsJsonAsync($"api/Client/{client.Id}", dto);
+                   var apiResp = await resp.Content.ReadFromJsonAsync<ApiResponse<ClientDto>>();
+
+                   NotificationService.Show(apiResp?.Message ?? "Неизвестная ошибка", apiResp?.Success ?? false);
+
+                   if (apiResp?.Success == true)
+                   {
+                       NotificationService.Show(apiResp?.Message ?? "Клиент успешно обновлён", apiResp?.Success ?? true);
+                       await LoadClients();
+                   }
+               },
+               model
+        );
+    }
+
+    private async Task DeleteClient(int id)
+    {
+        var resp = await Http.DeleteAsync($"api/Client/{id}");
+        var apiResp = await resp.Content.ReadFromJsonAsync<ApiResponse>();
+        NotificationService.Show(apiResp?.Message ?? "Ошибка удаления клиента", apiResp?.Success ?? false);
+
+        if (apiResp?.Success == true)
+            await LoadClients();
+    }
+
+    private async Task ChangeClientStatus(int id, bool toArchive)
+    {
+        try
+        {
+            HttpResponseMessage resp;
+
+            if (toArchive)
+            {
+                resp = await Http.PatchAsJsonAsync($"api/Client/{id}/archive", new {});
+            }
+            else
+            {
+                resp = await Http.PatchAsJsonAsync($"api/Client/{id}/unarchive", new {});
+            }
+
+            var apiResp = await resp.Content.ReadFromJsonAsync<ApiResponse<object>>();
+
+            NotificationService.Show(apiResp?.Message ?? "Операция выполнена", apiResp?.Success ?? false);
+
+            if (apiResp?.Success == true)
+            {
+                await LoadClients();
+            }
+        }
+        catch (Exception ex)
+        {
+            NotificationService.Show($"Ошибка изменения статуса: {ex.Message}", false);
+        }
+    }
+
+    private Task ShowMessage(string message)
+    {
+        Console.WriteLine(message);
+        return Task.CompletedTask;
+    }
+
+    private string GetStatusText(EntityStatus status)
+    {
+        return status switch
+        {
+            EntityStatus.Active => "Активно",
+            EntityStatus.Archived => "Архивировано",
+            _ => status.ToString()
+        };
+    }
+
+}

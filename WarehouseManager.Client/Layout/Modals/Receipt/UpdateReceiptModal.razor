@@ -1,0 +1,310 @@
+﻿@inject ModalFormService ModalFormService
+@inject HttpClient Http
+@inject NotificationService NotificationService
+@using WarehouseManager.Shared.Api
+@using WarehouseManager.Shared.Dtos.Receipt
+@using WarehouseManager.Shared.Dtos.Resource
+@using WarehouseManager.Shared.Dtos.Measure
+@implements IDisposable
+
+@if (ModalFormService.IsVisible && ModalFormService.Model is UpdateReceiptDto receiptModel)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-dialog-centered modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@ModalFormService.Title</h5>
+                    <button type="button" class="btn-close" @onclick="Close" disabled="@isSubmitting"></button>
+                </div>
+                <div class="modal-body">
+                    <EditForm Model="receiptModel" OnValidSubmit="HandleValidSubmit">
+                        <DataAnnotationsValidator />
+                        <div class="mb-3">
+                            <label class="form-label">Номер документа</label>
+                            <InputText class="@(isNameValid ? "form-control in-valid" : "form-control is-invalid")"
+                                       @bind-Value="receiptModel.DocumentNumber"
+                                       @onblur="async () => await CheckNameAsync(receiptModel.DocumentNumber)" />
+                            <ValidationMessage For="@(() => receiptModel.DocumentNumber)" />
+                        </div>
+
+
+                        <div class="mb-3">
+                            <label class="form-label">Дата получения</label>
+                            <InputDate class="form-control" @bind-Value="receiptModel.DateReceipt" />
+                            <ValidationMessage For="@(() => receiptModel.DateReceipt)" />
+                        </div>
+
+                        <h6>Ресурсы поступления</h6>
+
+                        <table class="table table-bordered">
+                            <thead>
+                                <tr>
+                                    <th>Ресурс</th>
+                                    <th>Единица измерения</th>
+                                    <th>Количество</th>
+                                    <th style="width:120px;">Действия</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @if (receiptModel.ReceiptResources == null || !receiptModel.ReceiptResources.Any())
+                                {
+                                    <tr><td colspan="4" class="text-center">Ресурсы не добавлены</td></tr>
+                                }
+                                else
+                                {
+                                     @foreach (var item in receiptModel.ReceiptResources)
+                                            {
+                                                <tr>
+                                                    <input type="hidden" @bind="item.Id" />
+                                                    <td>@allResources.FirstOrDefault(r => r.Id == item.ResourceId)?.Name</td>
+                                                    <td>@allMeasures.FirstOrDefault(m => m.Id == item.MeasureId)?.Name</td>
+                                                    <td>@item.Quantity</td>
+                                                    <td>
+                                                        <button type="button" class="btn btn-danger btn-sm" @onclick="() => RemoveResource(item)" disabled="@isSubmitting">x</button>
+                                                    </td>
+                                                </tr>
+                                            }
+                                        }
+                            </tbody>
+                        </table>
+
+                        <h6>Добавить ресурс</h6>
+                        <EditForm Model="@newResource" OnValidSubmit="@AddResource" Context="innerFormContext">
+                            <DataAnnotationsValidator />
+                            <div class="row g-4 align-items-end">
+                                <div class="col-sm-4">
+                                    <label class="form-label">Ресурс</label>
+                                    <InputSelect class="form-select" @bind-Value="newResource.ResourceId" disabled="@isSubmitting">
+                                        @foreach (var r in allResources)
+                                        {
+                                            <option value="@r.Id">@r.Name</option>
+                                        }
+                                    </InputSelect>
+                                    <ValidationMessage For="@(() => newResource.ResourceId)" />
+                                </div>
+                                <div class="col-sm-4">
+                                    <label class="form-label">Единица измерения</label>
+                                    <InputSelect class="form-select" @bind-Value="newResource.MeasureId" disabled="@isSubmitting">
+                                        @foreach (var m in allMeasures)
+                                        {
+                                            <option value="@m.Id">@m.Name</option>
+                                        }
+                                    </InputSelect>
+                                    <ValidationMessage For="@(() => newResource.MeasureId)" />
+                                </div>
+                                <div class="col-sm-3">
+                                    <label class="form-label">Количество</label>
+                                    <InputNumber TValue="int" class="form-control" @bind-Value="newResource.Quantity" disabled="@isSubmitting" />
+                                    <ValidationMessage For="@(() => newResource.Quantity)" />
+                                </div>
+                                <div class="col-sm-1 d-flex justify-content-center">
+                                    <button type="submit"
+                                            class="btn btn-success btn-sm d-flex align-items-center justify-content-center"
+                                            style="height:38px; width:38px;"
+                                            disabled="@isSubmitting"
+                                            title="Добавить">
+                                        <i class="bi bi-plus" style="font-size: 1.2rem;"></i>
+                                    </button>
+                                </div>
+                            </div>
+
+                        </EditForm>
+
+                        <div class="d-flex gap-2 mt-4">
+                            <button type="submit" class="btn btn-primary" disabled="@isSubmitting">Сохранить</button>
+                            <button type="button" class="btn btn-secondary" @onclick="Close" disabled="@isSubmitting">Отмена</button>
+                        </div>
+                    </EditForm>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<ResourceDto> allResources = new();
+    private List<MeasureDto> allMeasures = new();
+    private bool isSubmitting = false;
+    private string? nameCheckError;
+    private bool isNameValid = true;
+    private string? originalName;
+    private List<int>? documentResourcesIds;
+    public List<int>? documentMeasuresIds { get; private set; }
+
+    private UpdateReceiptResourcesDto newResource = new();
+
+    private async Task CheckNameAsync(string receiptName)
+    {
+        if (string.Equals(originalName, receiptName))
+        {
+            nameCheckError = null;
+            isNameValid = true;
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(receiptName))
+        {
+            nameCheckError = "Номер документа не может быть пустым";
+            isNameValid = false;
+            return;
+        }
+
+        var resp = await Http.GetFromJsonAsync<ApiResponse<bool>>(
+            $"api/Receipt/check-name?name={Uri.EscapeDataString(receiptName)}");
+
+        if (resp is null)
+        {
+            nameCheckError = "Ошибка проверки уникальности номера документа";
+            isNameValid = false;
+        }
+        else
+        {
+            nameCheckError = resp.Success && resp.Data ? null : resp.Message;
+            isNameValid = resp.Data;
+        }
+        if (!isNameValid)
+            NotificationService.Show(resp?.Message ?? "Ошибка проверки", isNameValid);
+    }
+
+    private async Task<List<ResourceDto>> LoadAllResourcesAsync()
+    {
+        var resp = await Http.GetFromJsonAsync<ApiResponse<List<ResourceDto>>>("api/Resource?isActive=true");
+        return resp?.Data ?? new();
+    }
+
+    private async Task<List<MeasureDto>> LoadAllMeasuresAsync()
+    {
+        var resp = await Http.GetFromJsonAsync<ApiResponse<List<MeasureDto>>>("api/Measure?isActive=true");
+        return resp?.Data ?? new();
+    }
+
+    private void RemoveResource(UpdateReceiptResourcesDto item)
+    {
+        if (ModalFormService.Model is UpdateReceiptDto model)
+        {
+            model.ReceiptResources?.Remove(item);
+        }
+    }
+
+    private void AddResource()
+    {
+        if (newResource.ResourceId == 0 || newResource.MeasureId == 0 || newResource.Quantity <= 0)
+        {
+            NotificationService.Show("Пожалуйста, заполните все поля для добавляемого ресурса", false);
+            return;
+        }
+        if (ModalFormService.Model is UpdateReceiptDto model)
+        {
+            if (model.ReceiptResources == null)
+                model.ReceiptResources = new List<UpdateReceiptResourcesDto>();
+            var resourceToAdd = new UpdateReceiptResourcesDto
+            {
+                ResourceId = newResource.ResourceId,
+                MeasureId = newResource.MeasureId,
+                Quantity = newResource.Quantity
+            };
+            model.ReceiptResources.Add(resourceToAdd);
+            newResource = new UpdateReceiptResourcesDto();
+        }
+    }
+
+
+    private async Task HandleValidSubmit()
+    {
+        if (ModalFormService.OnSubmitAsync == null)
+            return;
+
+        isSubmitting = true;
+        try
+        {
+            await ModalFormService.OnSubmitAsync(ModalFormService.Model!);
+            ModalFormService.Close();
+        }
+        catch (Exception ex)
+        {
+            NotificationService.Show($"Ошибка при обновлении документа: {ex.Message}", false);
+        }
+        finally
+        {
+            isSubmitting = false;
+            StateHasChanged();
+        }
+    }
+
+    private void Close()
+    {
+        originalName = "";
+        documentResourcesIds = new();
+        documentMeasuresIds = new();
+        if (!isSubmitting)
+            ModalFormService.Close();
+    }
+
+    private async Task LoadLocalResources()
+    {
+        var activeResources = await LoadAllResourcesAsync();
+        var docResources = new List<ResourceDto>();
+
+        if (ModalFormService.Model is UpdateReceiptDto receiptModel && receiptModel.ReceiptResources != null && documentResourcesIds != null)
+        {
+            foreach (var resourceId in documentResourcesIds)
+            {
+                var resp = await Http.GetFromJsonAsync<ApiResponse<ResourceDto>>($"api/Resource/{resourceId}");
+                docResources.Add(resp?.Data ?? new());
+            }
+        }
+        allResources = activeResources
+           .Concat(docResources.Where(r => !activeResources.Any(ar => ar.Id == r.Id)))
+           .OrderBy(r => r.Name)
+           .ToList();
+    }
+
+    private async Task LoadLocalMeasures()
+    {
+        var activeMeasures = await LoadAllMeasuresAsync();
+        var docResources = new List<MeasureDto>();
+
+        if (ModalFormService.Model is UpdateReceiptDto receiptModel && receiptModel.ReceiptResources != null && documentMeasuresIds != null)
+        {
+            foreach (var measureId in documentMeasuresIds)
+            {
+                var resp = await Http.GetFromJsonAsync<ApiResponse<MeasureDto>>($"api/Measure/{measureId}");
+                docResources.Add(resp?.Data ?? new());
+            }
+        }
+        allMeasures = activeMeasures
+           .Concat(docResources.Where(r => !activeMeasures.Any(ar => ar.Id == r.Id)))
+           .OrderBy(r => r.Name)
+           .ToList();
+    }
+    protected override void OnInitialized()
+    {
+        ModalFormService.OnChange += OnModalFormChange;
+        ModalFormService.OnChange += StateHasChanged;
+    }
+
+    private void OnModalFormChange()
+    {
+        originalName = ModalFormService.OriginalName ?? string.Empty;
+        documentResourcesIds = ModalFormService.DocumentResourcesIds ?? new();
+        documentMeasuresIds = ModalFormService.DocumentMeasuresIds ?? new();
+
+        _ = LoadLocalDataOnChange();
+
+        InvokeAsync(StateHasChanged);
+    }
+
+    private async Task LoadLocalDataOnChange()
+    {
+        await LoadLocalResources();
+        await LoadLocalMeasures();
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        ModalFormService.OnChange -= OnModalFormChange;
+        ModalFormService.OnChange -= StateHasChanged;
+    }
+}

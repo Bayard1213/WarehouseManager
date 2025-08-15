@@ -1,0 +1,83 @@
+﻿<div class="multiselect" tabindex="0" @onblur="CloseDropdown" @onclick="ToggleDropdown" style="position: relative; border: 1px solid #ccc; padding: 5px; border-radius: 4px; cursor: pointer;">
+    <div class="selected-items" style="display: flex; flex-wrap: wrap; gap: 5px;">
+        @foreach (var item in SelectedItems)
+        {
+            <div class="selected-item" style="background-color: #007bff; color: white; padding: 1px 5px; border-radius: 12px; display: flex; align-items: center; font-size: 14px;">
+                @item.Name
+                <button type="button" style="margin-left: 4px; background: transparent; border: none; color: white; cursor: pointer;" @onclick:stopPropagation="true" @onclick="() => RemoveItem(item)">×</button>
+            </div>
+        }
+        @if (!SelectedItems.Any())
+        {
+            <span style="color:gray;">Выберите...</span>
+        }
+    </div>
+
+    @if (IsOpen)
+    {
+        <ul class="options" style="position: absolute; top: 100%; left: 0; right: 0; max-height: 160px; overflow-y: auto; background: white; border: 1px solid #ccc; border-radius: 4px; margin-top: 2px; z-index: 1000; padding: 0; list-style: none;">
+            @foreach (var item in Items)
+            {
+                <li style="padding: 4px 8px; cursor: pointer; background: @(IsSelected(item) ? "#e9ecef" : "transparent")"
+                    @onclick:stopPropagation="true" @onclick="() => ToggleItem(item)">
+                    <input type="checkbox" checked="@IsSelected(item)" readonly style="margin-right: 8px;" />
+                    @item.Name
+                </li>
+            }
+        </ul>
+    }
+</div>
+
+@code {
+    public class SelectItem
+    {
+        public int Id { get; set; }
+        public string Name { get; set; } = "";
+    }
+
+    [Parameter]
+    public List<SelectItem> Items { get; set; } = new();
+
+    [Parameter]
+    public List<SelectItem> SelectedItems { get; set; } = new();
+
+    [Parameter]
+    public EventCallback<List<SelectItem>> SelectedItemsChanged { get; set; }
+
+    private bool IsOpen { get; set; } = false;
+
+    private void ToggleDropdown()
+    {
+        IsOpen = !IsOpen;
+    }
+
+    private void CloseDropdown()
+    {
+        IsOpen = false;
+        StateHasChanged();
+    }
+
+    private bool IsSelected(SelectItem item)
+    {
+        return SelectedItems.Any(i => i.Id == item.Id);
+    }
+
+    private async Task ToggleItem(SelectItem item)
+    {
+        if (IsSelected(item))
+        {
+            SelectedItems = SelectedItems.Where(i => i.Id != item.Id).ToList();
+        }
+        else
+        {
+            SelectedItems.Add(item);
+        }
+        await SelectedItemsChanged.InvokeAsync(SelectedItems);
+    }
+
+    private async Task RemoveItem(SelectItem item)
+    {
+        SelectedItems = SelectedItems.Where(i => i.Id != item.Id).ToList();
+        await SelectedItemsChanged.InvokeAsync(SelectedItems);
+    }
+}

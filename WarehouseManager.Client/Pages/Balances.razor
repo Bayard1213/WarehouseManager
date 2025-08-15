@@ -1,0 +1,141 @@
+﻿@page "/balances"
+@inject HttpClient Http
+@inject NotificationService NotificationService
+
+@using WarehouseManager.Shared.Api
+@using WarehouseManager.Shared.Dtos.Balance
+@using WarehouseManager.Shared.Dtos.Measure
+@using WarehouseManager.Shared.Dtos.Resource
+@using WarehouseManager.Client.Layout.Components
+
+<PageTitle>Баланс</PageTitle>
+<h3>Баланс</h3>
+
+<EditForm Model="@filter" OnValidSubmit="LoadBalances">
+    <div class="d-flex m-3 gap-3" style="flex-wrap: wrap;">
+        <div style="flex: 1 1 0; min-width: 200px;">
+            <label>Ресурсы</label>
+            <MultiSelect Items="@allResourcesSelectItems" SelectedItems="@selectedResources" SelectedItemsChanged="OnResourcesChanged" />
+        </div>
+        <div style="flex: 1 1 0; min-width: 200px;">
+            <label>Единицы измерения</label>
+            <MultiSelect Items="@allMeasuresSelectItems" SelectedItems="@selectedMeasures" SelectedItemsChanged="OnMeasuresChanged" />
+        </div>
+        <div class="form-check" style="flex: 0 0 auto; display: flex; align-items: center; margin-top: 32px;">
+            <input type="checkbox" class="form-check-input" @bind="filter.OnlyActive" id="onlyActive" />
+            <label class="form-check-label ms-2" for="onlyActive">Только активные</label>
+        </div>
+    </div>
+    <div class="m-3">
+        <button type="submit" class="btn btn-primary mb-3">Применить фильтр</button>
+    </div>
+</EditForm>
+
+
+@if (isLoading)
+{
+    <p><em>Загрузка...</em></p>
+}
+else if (balances is not null && balances.Any())
+{
+<table class="table table-striped table-bordered">
+    <thead>
+        <tr>
+            <th>Ресурс</th>
+            <th>Ед. измерения</th>
+            <th>Остаток</th>
+        </tr>
+    </thead>
+    <tbody>
+        @foreach (var b in balances)
+        {
+            <tr>
+                <td>@b.ResourceName</td>
+                <td>@b.MeasureName</td>
+                <td>@b.BalanceQuantity</td>
+            </tr>
+        }
+    </tbody>
+</table>
+}
+@code {
+    private BalanceFilterDto filter = new();
+    private List<VBalanceDto>? balances;
+    private List<ResourceDto> allResources = new();
+    private List<MeasureDto> allMeasures = new();
+    private bool isLoading = false;
+
+    private List<MultiSelect.SelectItem> allResourcesSelectItems = new();
+    private List<MultiSelect.SelectItem> allMeasuresSelectItems = new();
+
+    private List<MultiSelect.SelectItem> selectedResources = new();
+    private List<MultiSelect.SelectItem> selectedMeasures = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        allResources = await LoadAllResourcesAsync();
+        allMeasures = await LoadAllMeasuresAsync();
+
+        allResourcesSelectItems = allResources.Select(r => new MultiSelect.SelectItem { Id = r.Id, Name = r.Name }).ToList();
+        allMeasuresSelectItems = allMeasures.Select(m => new MultiSelect.SelectItem { Id = m.Id, Name = m.Name }).ToList();
+
+        selectedResources = allResourcesSelectItems.Where(i => filter.ResourceIds?.Contains(i.Id) == true).ToList();
+        selectedMeasures = allMeasuresSelectItems.Where(i => filter.MeasureIds?.Contains(i.Id) == true).ToList();
+
+        await LoadBalances();
+    }
+
+    private async Task LoadBalances()
+    {
+        isLoading = true;
+        try
+        {
+            var query = new List<string>();
+            if (filter.ResourceIds?.Any() == true)
+                query.AddRange(filter.ResourceIds.Select(id => $"ResourceIds={id}"));
+            if (filter.MeasureIds?.Any() == true)
+                query.AddRange(filter.MeasureIds.Select(id => $"MeasureIds={id}"));
+            if (filter.OnlyActive)
+                query.Add("OnlyActive=true");
+            var queryString = query.Any() ? "?" + string.Join("&", query) : string.Empty;
+            var response = await Http.GetFromJsonAsync<ApiResponse<List<VBalanceDto>>>($"api/Balance{queryString}");
+
+            balances = response?.Data ?? new();
+        }
+        catch (Exception ex)
+        {
+            NotificationService.Show($"Ошибка загрузки баланса: {ex.Message}", false);
+        }
+        finally
+        {
+            isLoading = false;
+        }
+        StateHasChanged();
+    }
+
+    private Task OnResourcesChanged(List<MultiSelect.SelectItem> selected)
+    {
+        selectedResources = selected;
+        filter.ResourceIds = selected.Select(i => i.Id).ToList();
+        return Task.CompletedTask;
+    }
+
+    private Task OnMeasuresChanged(List<MultiSelect.SelectItem> selected)
+    {
+        selectedMeasures = selected;
+        filter.MeasureIds = selected.Select(i => i.Id).ToList();
+        return Task.CompletedTask;
+    }
+
+    private async Task<List<ResourceDto>> LoadAllResourcesAsync()
+    {
+        var response = await Http.GetFromJsonAsync<ApiResponse<List<ResourceDto>>>("api/Resource/all");
+        return response?.Data ?? new();
+    }
+
+    private async Task<List<MeasureDto>> LoadAllMeasuresAsync()
+    {
+        var response = await Http.GetFromJsonAsync<ApiResponse<List<MeasureDto>>>("api/Measure/all");
+        return response?.Data ?? new();
+    }
+}

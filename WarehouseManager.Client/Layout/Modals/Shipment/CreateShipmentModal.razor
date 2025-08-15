@@ -1,0 +1,286 @@
+﻿
+@inject ModalFormService ModalFormService
+@inject HttpClient Http
+@inject NotificationService NotificationService
+@using WarehouseManager.Shared.Api
+@using WarehouseManager.Shared.Dtos.Shipment
+@using WarehouseManager.Shared.Dtos.Resource
+@using WarehouseManager.Shared.Dtos.Measure
+@using WarehouseManager.Shared.Dtos.Client
+@implements IDisposable
+
+@if (ModalFormService.IsVisible && ModalFormService.Model is CreateShipmentDto shipmentModel)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-dialog-centered modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@ModalFormService.Title</h5>
+                    <button type="button" class="btn-close" @onclick="Close" disabled="@isSubmitting"></button>
+                </div>
+                <div class="modal-body">
+                    <EditForm Model="shipmentModel" OnValidSubmit="HandleValidSubmit">
+                        <DataAnnotationsValidator />
+                        <div class="mb-3">
+                            <label class="form-label">Номер документа</label>
+                            <InputText class="@(isNameValid ? "form-control in-valid" : "form-control is-invalid")"
+                                       @bind-Value="shipmentModel.DocumentNumber"
+                                       @onblur="async () => await CheckNameAsync(shipmentModel.DocumentNumber)" />
+                            <ValidationMessage For="@(() => shipmentModel.DocumentNumber)" />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Клиент</label>
+                            <InputSelect class="form-select" @bind-Value="shipmentModel.ClientId" disabled="@isSubmitting">
+                                <option hidden value="">Выберите клиента</option>
+                                @foreach (var c in allClients)
+                                {
+                                    <option value="@c.Id">@c.Name</option>
+                                }
+                            </InputSelect>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Дата получения</label>
+                            <InputDate class="form-control" @bind-Value="shipmentModel.DateShipment" />
+                            <ValidationMessage For="@(() => shipmentModel.DateShipment)" />
+                        </div>
+
+                        <h6>Ресурсы поступления</h6>
+
+                        <table class="table table-bordered">
+                            <thead>
+                                <tr>
+                                    <th>Ресурс</th>
+                                    <th>Единица измерения</th>
+                                    <th>Количество</th>
+                                    <th style="width:120px;">Действия</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @if (shipmentModel.ShipmentResources == null || !shipmentModel.ShipmentResources.Any())
+                                {
+                                    <div class="text-danger mt-2 mb-0 fw-bold">
+                                        Добавьте хотя бы один ресурс, чтобы сохранить отгрузку.
+                                    </div>
+                                }
+                                else
+                                {
+                                    @foreach (var item in shipmentModel.ShipmentResources)
+                                    {
+                                        <tr>
+                                            <td>@allResources.FirstOrDefault(r => r.Id == item.ResourceId)?.Name</td>
+                                            <td>@allMeasures.FirstOrDefault(m => m.Id == item.MeasureId)?.Name</td>
+                                            <td>@item.Quantity</td>
+                                            <td>
+                                                <button type="button" class="btn btn-danger btn-sm" @onclick="() => RemoveResource(item)" disabled="@isSubmitting">
+                                                    x
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    }
+                                }
+                            </tbody>
+                        </table>
+
+                        <h6>Добавить ресурс</h6>
+                        <EditForm Model="@newResource" OnValidSubmit="@AddResource" Context="innerFormContext">
+                            <DataAnnotationsValidator />
+                            <div class="row g-4 align-items-end">
+                                <div class="col-sm-4">
+                                    <label class="form-label">Ресурс</label>
+                                    <InputSelect class="form-select" @bind-Value="newResource.ResourceId" disabled="@isSubmitting">
+                                        @foreach (var r in allResources)
+                                        {
+                                            <option value="@r.Id">@r.Name</option>
+                                        }
+                                    </InputSelect>
+                                    <ValidationMessage For="@(() => newResource.ResourceId)" />
+                                </div>
+                                <div class="col-sm-4">
+                                    <label class="form-label">Единица измерения</label>
+                                    <InputSelect class="form-select" @bind-Value="newResource.MeasureId" disabled="@isSubmitting">
+                                        @foreach (var m in allMeasures)
+                                        {
+                                            <option value="@m.Id">@m.Name</option>
+                                        }
+                                    </InputSelect>
+                                    <ValidationMessage For="@(() => newResource.MeasureId)" />
+                                </div>
+                                <div class="col-sm-3">
+                                    <label class="form-label">Количество</label>
+                                    <InputNumber TValue="int" class="form-control" @bind-Value="newResource.Quantity" disabled="@isSubmitting" />
+                                    <ValidationMessage For="@(() => newResource.Quantity)" />
+                                </div>
+                                <div class="col-sm-1 d-flex justify-content-center">
+                                    <button type="submit"
+                                            class="btn btn-success btn-sm d-flex align-items-center justify-content-center"
+                                            style="height:38px; width:38px;"
+                                            disabled="@isSubmitting"
+                                            title="Добавить">
+                                        <i class="bi bi-plus" style="font-size: 1.2rem;"></i>
+                                    </button>
+                                </div>
+                            </div>
+
+                        </EditForm>
+
+                        <div class="d-flex gap-2 mt-4">
+                            <button type="submit" class="btn btn-primary"
+                                    disabled="@(isSubmitting || !isNameValid || shipmentModel.ShipmentResources is null || !shipmentModel.ShipmentResources.Any())">
+                                Сохранить
+                            </button>
+                            <button type="button" class="btn btn-secondary" @onclick="Close" disabled="@isSubmitting">Отмена</button>
+                        </div>
+                    </EditForm>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<ClientDto> allClients = new();
+    private List<ResourceDto> allResources = new();
+    private List<MeasureDto> allMeasures = new();
+    private bool isSubmitting = false;
+    private string? nameCheckError;
+    private bool isNameValid = true;
+    private string? originalName;
+
+    private CreateShipmentResourcesDto newResource = new();
+
+    private async Task CheckNameAsync(string shipmentName)
+    {
+        if (string.Equals(originalName, shipmentName))
+        {
+            nameCheckError = null;
+            isNameValid = true;
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(shipmentName))
+        {
+            nameCheckError = "Номер документа не может быть пустым";
+            isNameValid = false;
+            return;
+        }
+
+        var resp = await Http.GetFromJsonAsync<ApiResponse<bool>>(
+            $"api/Shipment/check-name?name={Uri.EscapeDataString(shipmentName)}");
+
+        if (resp is null)
+        {
+            nameCheckError = "Ошибка проверки уникальности номера документа";
+            isNameValid = false;
+        }
+        else
+        {
+            nameCheckError = resp.Success && resp.Data ? null : resp.Message;
+            isNameValid = resp.Data;
+        }
+        if (!isNameValid)
+            NotificationService.Show(resp?.Message ?? "Ошибка проверки", isNameValid);
+    }
+
+
+
+    protected override async Task OnInitializedAsync()
+    {
+        allResources = await LoadAllResourcesAsync();
+        allMeasures = await LoadAllMeasuresAsync();
+        allClients = await LoadAllClientAsync();
+
+        ModalFormService.OnChange += OnModalFormChange;
+        ModalFormService.OnChange += StateHasChanged;
+    }
+
+    private async Task<List<ClientDto>> LoadAllClientAsync()
+    {
+        var resp = await Http.GetFromJsonAsync<ApiResponse<List<ClientDto>>>("api/Client?isActive=true");
+        return resp?.Data ?? new();
+    }
+
+    private async Task<List<ResourceDto>> LoadAllResourcesAsync()
+    {
+        var resp = await Http.GetFromJsonAsync<ApiResponse<List<ResourceDto>>>("api/Resource?isActive=true");
+        return resp?.Data ?? new();
+    }
+
+    private async Task<List<MeasureDto>> LoadAllMeasuresAsync()
+    {
+        var resp = await Http.GetFromJsonAsync<ApiResponse<List<MeasureDto>>>("api/Measure?isActive=true");
+        return resp?.Data ?? new();
+    }
+
+    private void RemoveResource(CreateShipmentResourcesDto item)
+    {
+        if (ModalFormService.Model is CreateShipmentDto model)
+        {
+            model.ShipmentResources?.Remove(item);
+            StateHasChanged();
+        }
+    }
+
+    private void AddResource()
+    {
+        if (newResource.ResourceId == 0 || newResource.MeasureId == 0 || newResource.Quantity <= 0)
+        {
+            NotificationService.Show("Пожалуйста, заполните все поля для добавляемого ресурса", false);
+            return;
+        }
+        if (ModalFormService.Model is CreateShipmentDto model)
+        {
+            if (model.ShipmentResources == null)
+                model.ShipmentResources = new List<CreateShipmentResourcesDto>();
+            var resourceToAdd = new CreateShipmentResourcesDto
+            {
+                ResourceId = newResource.ResourceId,
+                MeasureId = newResource.MeasureId,
+                Quantity = newResource.Quantity
+            };
+            model.ShipmentResources.Add(resourceToAdd);
+            newResource = new CreateShipmentResourcesDto();
+            StateHasChanged();
+        }
+    }
+
+
+    private async Task HandleValidSubmit()
+    {
+        if (ModalFormService.OnSubmitAsync == null)
+            return;
+
+        isSubmitting = true;
+        try
+        {
+            await ModalFormService.OnSubmitAsync(ModalFormService.Model!);
+            ModalFormService.Close();
+        }
+        catch (Exception ex)
+        {
+            NotificationService.Show($"Ошибка при создании документа: {ex.Message}", false);
+        }
+        finally
+        {
+            isSubmitting = false;
+            StateHasChanged();
+        }
+    }
+
+    private void Close()
+    {
+        originalName = "";
+        if (!isSubmitting)
+            ModalFormService.Close();
+    }
+    private void OnModalFormChange()
+    {
+        originalName = ModalFormService.OriginalName ?? string.Empty;
+
+        InvokeAsync(StateHasChanged);
+    }
+    public void Dispose()
+    {
+        ModalFormService.OnChange -= OnModalFormChange;
+        ModalFormService.OnChange -= StateHasChanged;
+    }
+}
