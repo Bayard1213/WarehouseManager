@@ -329,19 +329,18 @@ namespace WarehouseManager.Server.Migrations
 
             // v_shipment_document_resource
             migrationBuilder.Sql(@"
-            CREATE OR REPLACE VIEW v_shipment_document_resource AS
+            CREATE OR REPLACE VIEW v_balance AS
             SELECT
-                sr.id AS shipment_resource_id,
-                sr.document_shipment_id,
-                sr.resource_id,
+                b.resource_id,
                 r.name AS resource_name,
-                sr.measure_id,
+                r.status AS resource_status,
+                b.measure_id,
                 m.name AS measure_name,
-                sr.quantity
-            FROM
-                shipment_resources sr
-            JOIN resources r ON r.id = sr.resource_id
-            JOIN measures m ON m.id = sr.measure_id;
+                m.status AS measure_status,
+                b.quantity AS balance_quantity
+            FROM balances b
+            JOIN resources r ON r.id = b.resource_id
+            JOIN measures m ON m.id = b.measure_id;
             ");
 
             #endregion
