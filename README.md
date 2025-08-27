@@ -1,8 +1,5 @@
 # WarehouseManager
 
-Реализован был полный функционал
-
----
 В качестве базы данных использовался PostgreSQL
 
 ***connectionString*** в application.json
